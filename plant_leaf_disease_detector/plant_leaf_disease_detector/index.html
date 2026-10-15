@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Plant Leaf Disease Detector</title>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;800&family=Instrument+Sans:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#eef2ec;--panel:#fff;--ink:#1d2b22;--mute:#5d6b61;--line:#cfd8cc;--leaf:#3e7b4f;--yellow:#c9a227;--brown:#8a5a2b;--white:#7d8a96;--dark:#2b2b2b;--btn:#1d2b22;--btnt:#eef2ec;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){color-scheme:dark;--bg:#14201a;--panel:#1c2b23;--ink:#e6efe6;--mute:#9fb0a4;--line:#2f4437;--leaf:#6fb583;--yellow:#e2c14f;--brown:#c48a52;--white:#a9b5c0;--dark:#8a8a8a;--btn:#e6efe6;--btnt:#14201a}}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#14201a;--panel:#1c2b23;--ink:#e6efe6;--mute:#9fb0a4;--line:#2f4437;--leaf:#6fb583;--yellow:#e2c14f;--brown:#c48a52;--white:#a9b5c0;--dark:#8a8a8a;--btn:#e6efe6;--btnt:#14201a}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 "Instrument Sans",system-ui,sans-serif}
+main{max-width:860px;margin:0 auto;padding:28px 18px 48px}
+h1{font:800 clamp(2rem,6vw,3.2rem)/1.02 "Bricolage Grotesque",Georgia,serif;margin:0 0 8px;letter-spacing:-.02em}
+p.lead{color:var(--mute);margin:0 0 22px;max-width:60ch}
+.drop{border:2px dashed var(--line);background:var(--panel);border-radius:14px;padding:26px;text-align:center;cursor:pointer}
+.drop.over,.drop:focus-visible{border-color:var(--leaf);outline:none}
+.row{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0 22px}
+button{font:600 .9rem "Instrument Sans",sans-serif;padding:9px 14px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--ink);cursor:pointer}
+button:hover{border-color:var(--leaf)}button:focus-visible{outline:2px solid var(--leaf);outline-offset:2px}
+.views{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+figure{margin:0;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px}
+canvas{width:100%;height:auto;display:block;border-radius:6px;background:#f4f4f4}
+figcaption{font-size:.85rem;color:var(--mute);margin-top:6px}
+#result{margin-top:22px;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px;display:none}
+#result h2{font:800 1.6rem "Bricolage Grotesque",serif;margin:0 0 4px}
+.sev{display:inline-block;font-weight:600;font-size:.85rem;padding:2px 10px;border-radius:99px;border:1px solid currentColor}
+.bars{margin:16px 0}
+.bar{display:grid;grid-template-columns:110px 1fr 52px;gap:10px;align-items:center;font-size:.9rem;margin:6px 0}
+.track{height:10px;background:var(--bg);border-radius:6px;overflow:hidden}
+.fill{height:100%;width:0;transition:width .5s}
+small{color:var(--mute);display:block;margin-top:14px}
+@media(max-width:560px){.views{grid-template-columns:1fr}.bar{grid-template-columns:90px 1fr 46px}}
+@media(prefers-reduced-motion:reduce){.fill{transition:none}}
+</style>
+</head>
+<body>
+<main>
+<h1>Plant leaf disease detector</h1>
+<p class="lead">Upload a photo of one leaf on a plain light background. The page measures how much of the leaf is yellow, brown, dark or powdery white, then suggests the likely problem.</p>
+<div class="drop" id="drop" tabindex="0" role="button" aria-label="Choose a leaf photo">
+<strong>Drop a leaf photo here</strong> or click to choose a file
+<input type="file" id="file" accept="image/*" hidden>
+</div>
+<div class="row">
+<span style="color:var(--mute);align-self:center">No photo? Try a sample:</span>
+<button data-s="healthy">Healthy leaf</button><button data-s="blight">Leaf spot</button>
+<button data-s="yellow">Yellowing</button><button data-s="mildew">Powdery mildew</button>
+</div>
+<div class="views">
+<figure><canvas id="src" width="320" height="320"></canvas><figcaption>Your leaf</figcaption></figure>
+<figure><canvas id="out" width="320" height="320"></canvas><figcaption>Damage found: yellow, brown, white and dark areas are highlighted</figcaption></figure>
+</div>
+<section id="result" aria-live="polite">
+<h2 id="dx"></h2><span class="sev" id="sev"></span>
+<p id="adv"></p>
+<div class="bars" id="bars"></div>
+<small>This is a colour-based estimate for learning. It cannot confirm a disease. For a crop decision, ask a local agriculture officer or send a sample to a lab.</small>
+</section>
+</main>
+<script>
+const $=id=>document.getElementById(id),src=$('src'),out=$('out'),sctx=src.getContext('2d',{willReadFrequently:true}),octx=out.getContext('2d');
+const INFO={
+healthy:{n:'Healthy leaf',a:'No significant damage found. Keep regular watering and check again weekly.'},
+brown:{n:'Likely leaf spot or blight (fungal)',a:'Remove badly affected leaves, avoid watering from above, improve airflow, and consider a copper or other recommended fungicide.'},
+yellow:{n:'Likely yellowing (nutrient shortage or virus)',a:'Check soil nitrogen and iron, avoid over-watering, and look for insects such as whiteflies that spread viruses.'},
+white:{n:'Likely powdery mildew',a:'Prune crowded growth, keep leaves dry, and use sulphur-based or neem oil spray early in the day.'},
+dark:{n:'Likely black spot or rot',a:'Cut off dark infected tissue, burn or bin it, and keep the soil well drained.'}};
+const CLS=[{k:'yellow',l:'Yellow',c:'--yellow',rgb:[230,190,30]},{k:'brown',l:'Brown',c:'--brown',rgb:[150,80,30]},{k:'white',l:'White powder',c:'--white',rgb:[60,120,230]},{k:'dark',l:'Dark spots',c:'--dark',rgb:[200,30,120]}];
+
+function hsv(r,g,b){r/=255;g/=255;b/=255;const m=Math.max(r,g,b),d=m-Math.min(r,g,b);let h=0;
+if(d){h=m==r?((g-b)/d)%6:m==g?(b-r)/d+2:(r-g)/d+4;h*=60;if(h<0)h+=360}return[h,m?d/m:0,m]}
+
+function analyze(){
+const w=src.width,h=src.height,px=sctx.getImageData(0,0,w,h),d=px.data,n=w*h;
+const lm=new Uint8Array(n),rMin=new Int16Array(h).fill(9999),rMax=new Int16Array(h).fill(-1),cMin=new Int16Array(w).fill(9999),cMax=new Int16Array(w).fill(-1);
+const H=new Float32Array(n),S=new Float32Array(n),V=new Float32Array(n);
+for(let i=0;i<n;i++){const[hh,s,v]=hsv(d[i*4],d[i*4+1],d[i*4+2]);H[i]=hh;S[i]=s;V[i]=v;
+ if(s>.22&&v>=.2&&hh>=10&&hh<=165){lm[i]=1;const x=i%w,y=(i/w)|0;
+ if(x<rMin[y])rMin[y]=x;if(x>rMax[y])rMax[y]=x;if(y<cMin[x])cMin[x]=y;if(y>cMax[x])cMax[x]=y}}
+const cnt={yellow:0,brown:0,white:0,dark:0,healthy:0};let leaf=0;const o=octx.createImageData(w,h);
+for(let i=0;i<n;i++){const x=i%w,y=(i/w)|0;let k=null;
+ const inside=x>=rMin[y]&&x<=rMax[y]&&y>=cMin[x]&&y<=cMax[x];
+ if(lm[i]){k=H[i]>=70?'healthy':H[i]>=45?'yellow':'brown'}
+ else if(inside){if(V[i]<.2)k='dark';else if(S[i]<.18&&V[i]>.6)k='white'}
+ let r=235,g=235,b=235,a=255;
+ if(k){leaf++;cnt[k]++;const dim=k=='healthy';
+  if(dim){r=d[i*4]*.55+100;g=d[i*4+1]*.55+100;b=d[i*4+2]*.55+100}
+  else{[r,g,b]=CLS.find(c=>c.k==k).rgb}}
+ o.data.set([r,g,b,a],i*4)}
+octx.putImageData(o,0,0);
+show(cnt,leaf)}
+
+function show(cnt,leaf){
+const box=$('result');box.style.display='block';
+if(leaf<200){$('dx').textContent='No leaf found';$('sev').textContent='';$('adv').textContent='Use a close photo of one leaf on a plain white or grey background.';$('bars').innerHTML='';return}
+const bad=cnt.yellow+cnt.brown+cnt.white+cnt.dark,pct=100*bad/leaf;
+let top=CLS.map(c=>c.k).sort((a,b)=>cnt[b]-cnt[a])[0];
+const key=pct<3?'healthy':top,sev=pct<3?'None':pct<15?'Mild':pct<35?'Moderate':'Severe';
+$('dx').textContent=INFO[key].n;$('adv').textContent=INFO[key].a;
+const s=$('sev');s.textContent=`${sev} · ${pct.toFixed(1)}% of leaf affected`;s.style.color=pct<3?'var(--leaf)':pct<15?'var(--yellow)':'var(--brown)';
+$('bars').innerHTML=[{l:'Healthy green',c:'--leaf',v:cnt.healthy},...CLS.map(c=>({l:c.l,c:c.c,v:cnt[c.k]}))]
+.map(r=>{const p=100*r.v/leaf;return `<div class="bar"><span>${r.l}</span><div class="track"><div class="fill" style="background:var(${r.c});width:${p}%"></div></div><span>${p.toFixed(1)}%</span></div>`}).join('')}
+
+function load(img){const r=Math.min(1,320/Math.max(img.width,img.height));src.width=out.width=Math.round(img.width*r);src.height=out.height=Math.round(img.height*r);
+sctx.drawImage(img,0,0,src.width,src.height);analyze()}
+function pick(f){if(!f)return;const img=new Image();img.onload=()=>load(img);img.src=URL.createObjectURL(f)}
+$('drop').onclick=()=>$('file').click();
+$('drop').onkeydown=e=>{if(e.key=='Enter'||e.key==' '){e.preventDefault();$('file').click()}};
+$('file').onchange=e=>pick(e.target.files[0]);
+$('drop').ondragover=e=>{e.preventDefault();$('drop').classList.add('over')};
+$('drop').ondragleave=()=>$('drop').classList.remove('over');
+$('drop').ondrop=e=>{e.preventDefault();$('drop').classList.remove('over');pick(e.dataTransfer.files[0])};
+
+function sample(t){
+src.width=out.width=src.height=out.height=320;const c=sctx;c.fillStyle='#f4f4f4';c.fillRect(0,0,320,320);
+const path=()=>{c.beginPath();c.moveTo(160,20);c.bezierCurveTo(300,80,300,240,160,300);c.bezierCurveTo(20,240,20,80,160,20);c.closePath()};
+path();c.fillStyle='#3f8a4a';c.fill();c.save();path();c.clip();
+const blob=(x,y,r,col)=>{c.fillStyle=col;c.beginPath();c.arc(x,y,r,0,7);c.fill()};
+if(t=='blight')for(let i=0;i<14;i++){const x=90+Math.random()*140,y=60+Math.random()*210,r=6+Math.random()*10;blob(x,y,r+5,'#b9a53a');blob(x,y,r,'#7a4a22')}
+if(t=='yellow'){const g=c.createRadialGradient(160,170,10,160,170,140);g.addColorStop(0,'#d6c443');g.addColorStop(.6,'#c8bb44');g.addColorStop(1,'#6f9a40');c.fillStyle=g;c.fillRect(0,0,320,320)}
+if(t=='mildew')for(let i=0;i<16;i++)blob(90+Math.random()*140,60+Math.random()*210,10+Math.random()*16,'rgba(245,245,245,.9)');
+c.restore();c.strokeStyle='#2f6a3a';c.lineWidth=3;c.beginPath();c.moveTo(160,22);c.lineTo(160,298);c.stroke();analyze()}
+document.querySelectorAll('[data-s]').forEach(b=>b.onclick=()=>sample(b.dataset.s));
+sample('blight');
+</script>
+</body>
+</html>
